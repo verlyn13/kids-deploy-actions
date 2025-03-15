@@ -1,0 +1,52 @@
+name: Reusable Deploy Workflow
+
+on:
+  workflow_call:
+    inputs:
+      build_command:
+        required: false
+        type: string
+        default: ''
+      build_output_dir:
+        required: true
+        type: string
+      remote_target_dir:
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js (if needed)
+        if: inputs.build_command != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install Dependencies (if build_command exists)
+        if: inputs.build_command != ''
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile || npm install
+
+      - name: Run Build Command (if provided)
+        if: inputs.build_command != ''
+        run: ${{ inputs.build_command }}
+
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_KEY }}
+
+      - name: Add server to known_hosts
+        run: ssh-keyscan -p ${{ secrets.SSH_PORT }} ${{ secrets.HOST_IP }} >> ~/.ssh/known_hosts
+
+      - name: Deploy via rsync
+        run: |
+          rsync -avz --delete -e "ssh -p ${{ secrets.SSH_PORT }}" \
+            ./${{ inputs.build_output_dir }}/ \
+            deploy@${{ secrets.HOST_IP }}:${{ inputs.remote_target_dir }}
